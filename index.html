@@ -4,11 +4,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>多人实时选人系统</title>
+<title>多人实时选人系统（带在线人数）</title>
 <style>
   *{box-sizing:border-box;font-family:Arial,sans-serif}
   body{max-width:1000px;margin:0 auto;padding:20px;background:#f5f7fa}
   h1,h2{text-align:center}
+  .online-count{text-align:center;font-size:18px;font-weight:bold;color:#0d6efd;margin-bottom:10px}
   .box{background:white;padding:20px;border-radius:12px;margin-bottom:16px;box-shadow:0 2px 8px #0001}
   .leaders{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
   .leader{padding:10px 16px;border-radius:8px;background:#e3f2fd;font-weight:bold}
@@ -20,6 +21,9 @@
 </style>
 </head>
 <body>
+
+<!-- 新增：在线人数显示区域 -->
+<div class="online-count" id="online_count">当前在线：0人</div>
 
 <h1>班级分组选人系统</h1>
 <p class="tip">实时同步｜7位组长｜蛇形顺序</p>
@@ -36,10 +40,8 @@
 
 <script>
 // ======================================
-// 组长：1 2 3 4 5 6 7
+// 基础配置（保持不变）
 const leaders = ["1","2","3","4","5","6","7"];
-
-// 你给的全部49人
 const users = [
 "胡嘉慧","李金柳","梁丽雯","廖庆烨","梁爽","苏雯慧","杨惠婷",
 "陈杜娟","陈桦婷","邓吉定","范莉莉","甘微微","甘志青",
@@ -52,25 +54,47 @@ const users = [
 ];
 // ======================================
 
+// 全局状态（新增 onlineUsers 记录在线人数）
 let state = {
   turn: 0,
   selected: {},
-  direction: 1
+  direction: 1,
+  onlineUsers: 0 // 新增：在线人数
 };
 
-// 连接到免费实时同步服务器
+// 连接实时同步服务器
 const ws = new WebSocket('wss://realtime-demo.deno.dev');
-ws.onopen = () => ws.send(JSON.stringify({type:'join', room:'class-999'}));
+ws.onopen = () => {
+  // 加入房间时，发送上线通知
+  ws.send(JSON.stringify({type:'join', room:'class-999'}));
+  ws.send(JSON.stringify({type:'online', action:'join'}));
+};
+
 ws.onmessage = (e) => {
   const data = JSON.parse(e.data);
+  // 更新选人状态
   if(data.type === 'state') {
-    state = data.state;
+    state = { ...state, ...data.state };
     render();
+  }
+  // 更新在线人数（核心新增逻辑）
+  if(data.type === 'onlineCount') {
+    state.onlineUsers = data.count;
+    renderOnlineCount();
   }
 };
 
+// 新增：渲染在线人数
+function renderOnlineCount() {
+  const countEl = document.getElementById('online_count');
+  countEl.innerText = `当前在线：${state.onlineUsers}人`;
+}
+
+// 渲染选人界面（原有逻辑不变）
 function render(){
+  renderOnlineCount(); // 每次渲染都更新人数
   document.getElementById('current_leader').innerText = leaders[state.turn];
+  
   const leaderEl = document.getElementById('leader_list');
   leaderEl.innerHTML = '';
   leaders.forEach((n,i)=>{
@@ -92,6 +116,7 @@ function render(){
   });
 }
 
+// 选人逻辑（原有逻辑不变）
 function pick(e){
   const name = e.target.innerText;
   if(state.selected[name]) return;
@@ -107,10 +132,19 @@ function pick(e){
     state.turn = 0;
   }
 
-  // 把新状态发送给服务器，同步给所有人
-  ws.send(JSON.stringify({type:'update', state}));
+  // 发送更新状态
+  ws.send(JSON.stringify({type:'update', state: {
+    turn: state.turn,
+    selected: state.selected,
+    direction: state.direction
+  }}));
   render();
 }
+
+// 页面关闭时，发送下线通知
+window.onbeforeunload = () => {
+  ws.send(JSON.stringify({type:'online', action:'leave'}));
+};
 
 // 初始化渲染
 render();
